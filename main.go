@@ -2320,19 +2320,6 @@ func main() {
 			}
 		}
 
-		// image, _, err := image.DecodeConfig(file)
-		// if err != nil {
-		// 	http.Error(w, "Cannot read the image configs", http.StatusInternalServerError)
-		// 	return
-		// }
-
-		// if image.Height < 155 && image.Width < 155 {
-		// 	http.Error(w, "Image resolution too low", http.StatusInternalServerError)
-		// 	return
-		// }
-
-		// fmt.Fprintln(w, fileHeader.Filename, ":", image.Width, "x", image.Height)
-
 		if match, _ := regexp.MatchString("^.*\\.(MP4|mp4|mov|MOV|GIF|gif)$", fileHeader.Filename); match {
 			//check for the file size
 			if size := fileHeader.Size; size > 1024*MB {
@@ -2638,14 +2625,6 @@ func main() {
 		_, err = db.Query("INSERT INTO story_seen_status(user_id,story_id,seen_status) VALUES($1,$2,$3)", updateStory.UserID, updateStory.StoryId, true)
 		if err != nil {
 			log.Panicln(err)
-		}
-	})
-
-	//reset password
-	http.HandleFunc("/resetPassword",func(w http.ResponseWriter, r *http.Request) {
-		if r.Method!=http.MethodPost{
-			http.Error(w, "Method Not allowed", http.StatusMethodNotAllowed)
-			return
 		}
 	})
 
