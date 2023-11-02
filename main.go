@@ -16,15 +16,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// db connection info
-const (
-	host     = "localhost"
-	port     = 5432
-	user     = "postgres"
-	password = "Ullas123"
-	dbname   = "instagram_db"
-)
-
 const MB = 1 << 20
 
 func main() {
