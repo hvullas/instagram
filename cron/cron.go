@@ -7,7 +7,7 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
-func RunCron() {
+func Run() {
 	//cron delete stories after 24 hours
 
 	//cron delete posts which are not updated with media
@@ -16,7 +16,7 @@ func RunCron() {
 	cron.AddFunc("29 16 * * *", func() {
 
 		//_,err=db.Query("DELETE FROM posts WHERE complete_post=$1",false)
-		_, err = db.DB.Query("DELETE FROM example WHERE timestamp<= current_timestamp - interval '10 minute'")
+		_, err := db.DB.Query("DELETE FROM example WHERE timestamp<= current_timestamp - interval '10 minute'")
 		if err != nil {
 			log.Panic(err)
 			return

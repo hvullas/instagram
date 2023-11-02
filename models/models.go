@@ -235,3 +235,23 @@ type UpdateStorySeenStatus struct {
 	UserID  int64 `json:"user_id"`
 	StoryId int64 `json:"story_id"`
 }
+
+// func to get the file extensions(used while serving files)
+func GetExtension(extension string) string {
+	switch extension {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".bmp":
+		return "image/bmp"
+	case ".mp4":
+		return "video/mp4"
+	case ".mov":
+		return "video/quicktime"
+	default:
+		return ""
+	}
+}

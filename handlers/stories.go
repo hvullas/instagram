@@ -375,7 +375,7 @@ func AllActiveStories(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	var userId UserID
+	var userId models.UserID
 	err := json.NewDecoder(r.Body).Decode(&userId)
 	if err != nil {
 		http.Error(w, "Invalid request body", http.StatusMethodNotAllowed)
@@ -383,7 +383,7 @@ func AllActiveStories(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var following []int64
-	row, err := db.Query("SELECT follower_id FROM follower WHERE user_id=$1 AND accepted=$2", userId.UserId, true)
+	row, err := db.DB.Query("SELECT follower_id FROM follower WHERE user_id=$1 AND accepted=$2", userId.UserId, true)
 	if err != nil {
 		log.Panicln("no follwings", err)
 	}
@@ -397,14 +397,14 @@ func AllActiveStories(w http.ResponseWriter, r *http.Request) {
 		following = append(following, id)
 	}
 
-	var activeStory []ActiveStories
+	var activeStory []models.ActiveStories
 	for _, id := range following {
-		var story ActiveStories
-		row, err := db.Query("SELECT story_id FROM stories WHERE user_id=$1 AND success =$2", id, true)
+		var story models.ActiveStories
+		row, err := db.DB.Query("SELECT story_id FROM stories WHERE user_id=$1 AND success =$2", id, true)
 		if err != nil {
 			panic(err)
 		}
-		err = db.QueryRow("SELECT user_name,display_pic FROM users WHERE user_id=$1", id).Scan(&story.User_name, &story.Profile_picURL)
+		err = db.DB.QueryRow("SELECT user_name,display_pic FROM users WHERE user_id=$1", id).Scan(&story.User_name, &story.Profile_picURL)
 		if err != nil {
 			log.Panicln(err)
 		}
@@ -418,7 +418,7 @@ func AllActiveStories(w http.ResponseWriter, r *http.Request) {
 				log.Panicln("no story id")
 			}
 			story.Story_id = append(story.Story_id, story_id)
-			err = db.QueryRow("SELECT seen_status FROM story_seen_status WHERE user_id=$1 AND story_id=$2", userId.UserId, story_id).Scan(&story.Seen_status)
+			err = db.DB.QueryRow("SELECT seen_status FROM story_seen_status WHERE user_id=$1 AND story_id=$2", userId.UserId, story_id).Scan(&story.Seen_status)
 			if err != nil {
 				//log.Panicln("no seen status", err)
 				continue
@@ -430,4 +430,24 @@ func AllActiveStories(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	json.NewEncoder(w).Encode(activeStory)
+}
+
+func UpdateStorySeenStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var story_id models.PostId
+	err := json.NewDecoder(r.Body).Decode(&story_id)
+	if err != nil {
+		panic(err)
+	}
+	var postUploadStatus models.SavedStatus
+	err = db.DB.QueryRow("SELECT success FROM stories WHERE story_id=$1", story_id.PostId).Scan(&postUploadStatus.SavedStatus)
+	if err != nil {
+		http.Error(w, "Invalid story id", http.StatusBadRequest)
+		return
+	}
+
+	json.NewEncoder(w).Encode(postUploadStatus)
 }

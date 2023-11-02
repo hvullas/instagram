@@ -1,6 +1,7 @@
 package main
 
 import (
+	"backend/cron"
 	"backend/db"
 	"backend/handlers"
 	"log"
@@ -15,9 +16,21 @@ import (
 	_ "github.com/lib/pq"
 )
 
+// db connection info
+const (
+	host     = "localhost"
+	port     = 5432
+	user     = "postgres"
+	password = "Ullas123"
+	dbname   = "instagram_db"
+)
+
+const MB = 1 << 20
+
 func main() {
 
 	db.ConnectDB()
+	defer db.DB.Close()
 
 	//create profilePhoto directory if not exists
 	if err := os.MkdirAll("./profilePhoto", os.ModePerm); err != nil {
@@ -34,9 +47,11 @@ func main() {
 		log.Fatal("Error creating posts directory", err)
 	}
 
-	//new user registration
+	cron.Run()
+
 	http.HandleFunc("/newUserInfo", handlers.NewUser)
 
+	//user authorisation
 	http.HandleFunc("/login", handlers.Login)
 
 	//handle function to upload users' display picture //ullas
@@ -70,44 +85,41 @@ func main() {
 	http.HandleFunc("/follow", handlers.FollowOthers)
 
 	//handle function to list followers of a user
-	http.HandleFunc("/followers", handlers.AllFollowers)
+	http.HandleFunc("/followers", handlers.GetFollowers)
 
 	//pending follow requests
-	http.HandleFunc("/getFollowRequests", handlers.FollowRequest)
+	http.HandleFunc("/getFollowRequests", handlers.PendingFollowRequests)
 
 	//response to follow requests
-	http.HandleFunc("/respondingRequest", handlers.AcceptFollowRqst)
+	http.HandleFunc("/respondingRequest", handlers.RespondingFollowRequests)
 
 	//handleFunc to remove follower
-	http.HandleFunc("/removeFollower", handlers.RemoveFollower)
+	http.HandleFunc("/removeFollower", handlers.RemoveFollowers)
 
 	//handle func to get list of users me following
-	http.HandleFunc("/following", handlers.Following)
+	http.HandleFunc("/following", handlers.GetFollowing)
 
 	//handle function to update bio in profile
 	http.HandleFunc("/updateBio", handlers.UpdateBio)
 
 	//get profile
-	http.HandleFunc("/userProfile", handlers.UserProfile)
+	http.HandleFunc("/userProfile", handlers.UpdateProfile)
 
 	//to save a post
 	http.HandleFunc("/savePost", handlers.SavePosts)
 
 	//handle function to get posts using post_id
-	http.HandleFunc("/getpost/", handlers.PostById)
+	http.HandleFunc("/getpost/", handlers.GetPost)
 
 	//handle func to get all saved posts of a user
 	http.HandleFunc("/savedposts", handlers.SavedPosts)
-	//delete post
-
-	http.HandleFunc("/deletePost", handlers.DeletePost)
 
 	//delete user
 	http.HandleFunc("/deleteAccount", handlers.DeleteAccount)
 
 	//remove saved post
 
-	http.HandleFunc("/removeSavedPost", handlers.RemoveSavedPosts)
+	http.HandleFunc("/removeSavedPost", handlers.RemoveSavedPost)
 
 	//turnoff commenting
 
@@ -115,20 +127,20 @@ func main() {
 
 	//turnon commenting
 
-	http.HandleFunc("/turnonComments", handlers.TurnOnComments)
+	http.HandleFunc("/turnonComments", handlers.TurnONComments)
 
 	//hide like count
 	http.HandleFunc("/hidelikeCount", handlers.HideLikeCount)
 
 	//show like count
-	http.HandleFunc("/showlikeCount", handlers.ShowLikeCounts)
+	http.HandleFunc("/showlikeCount", handlers.ShowLikeCount)
 
 	//delete comment
 	http.HandleFunc("/deleteComment", handlers.DeleteComment)
 
 	//api for searching users
 
-	http.HandleFunc("/searchAccounts", handlers.SearchAccount)
+	http.HandleFunc("/searchAccounts", handlers.SearchAccounts)
 
 	//search for hashtags
 	http.HandleFunc("/searchHashtag", handlers.SearchHashtag)
@@ -138,11 +150,13 @@ func main() {
 
 	//handle func to upload story media
 	http.HandleFunc("/uploadStoryPath", handlers.UploadStoryPath)
+
 	//download story
 
 	http.HandleFunc("/getStory", handlers.GetStory)
 
 	//download story api
+	//handle func to serve posts
 	http.HandleFunc("/download/stories/", handlers.DownloadStory)
 
 	//delete story
@@ -158,7 +172,7 @@ func main() {
 	http.HandleFunc("/getActiveStories", handlers.AllActiveStories)
 
 	//updates story seen status
-	http.HandleFunc("/updateStorySeenStatus", handlers.StorySeenStatus)
+	http.HandleFunc("/updateStorySeenStatus", handlers.UpdateStorySeenStatus)
 
 	http.ListenAndServe(":3000", nil)
 

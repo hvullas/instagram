@@ -788,7 +788,7 @@ func LikePosts(w http.ResponseWriter, r *http.Request) {
 	_, err = db.DB.Query(insertLike, requestBody.PostId, userName)
 	if err != nil {
 
-		_, err := db.Query("DELETE FROM likes WHERE user_name=$1", userName)
+		_, err := db.DB.Query("DELETE FROM likes WHERE user_name=$1", userName)
 		if err != nil {
 			panic(err)
 		}
@@ -948,4 +948,836 @@ func FollowOthers(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(follow)
 	}
 
+}
+
+func GetFollowers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method invalid", http.StatusMethodNotAllowed)
+		return
+	}
+	var userId models.UserID
+	err := json.NewDecoder(r.Body).Decode(&userId)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var follower models.Follows
+	var followers []models.Follows
+
+	row, err := db.DB.Query("SELECT user_id FROM follower WHERE follower_id=$1 AND accepted=$2", userId.UserId, true)
+	if err != nil {
+		panic(err)
+	}
+
+	for row.Next() {
+		err = row.Scan(&follower.UserID)
+		if err != nil {
+			panic(err)
+		}
+
+		err = db.DB.QueryRow("SELECT name,user_name,display_pic FROM users WHERE user_id=$1", follower.UserID).Scan(&follower.Name, &follower.UserName, &follower.ProfilePic)
+		if err != nil {
+			panic(err)
+		}
+		follower.ProfilePic = "http://localhost:3000/getProfilePic/" + follower.ProfilePic
+
+		//to check following back status
+		var id int64
+		err = db.DB.QueryRow("SELECT user_id FROM follower WHERE follower_id=$1 AND accepted=$2", follower.UserID, true).Scan(&id)
+		if err != nil {
+			follower.FollowingBackStatus = false
+		}
+
+		if id != userId.UserId {
+			follower.FollowingBackStatus = false
+		} else {
+			follower.FollowingBackStatus = true
+		}
+
+		followers = append(followers, follower)
+	}
+
+	json.NewEncoder(w).Encode(followers)
+}
+
+func PendingFollowRequests(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var userId models.UserID
+	json.NewDecoder(r.Body).Decode(&userId)
+
+	if userId.UserId == 0 {
+		http.Error(w, "Missing or invalid userId", http.StatusNotAcceptable)
+		return
+	}
+
+	row, err := db.DB.Query("SELECT user_id,created_at,accepted FROM follower WHERE follower_id=$1 AND accepted=$2", userId.UserId, false)
+	if err != nil {
+		panic(err)
+	}
+	var followRequest []models.FollowRequest
+	for row.Next() {
+		var followrequest models.FollowRequest
+		err = row.Scan(&followrequest.UserID, &followrequest.CreatedOn, &followrequest.Accepted)
+		if err != nil {
+			panic(err)
+		}
+
+		err = db.DB.QueryRow("SELECT user_name,display_pic FROM users WHERE user_id=$1", followrequest.UserID).Scan(&followrequest.UserName, &followrequest.ProfilePic)
+		if err != nil {
+			panic(err)
+		}
+		followrequest.ProfilePic = "http://localhost:3000/getProfilePhoto/" + followrequest.ProfilePic
+		followRequest = append(followRequest, followrequest)
+
+	}
+	json.NewEncoder(w).Encode(followRequest)
+}
+
+func RespondingFollowRequests(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid Method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var accepted models.FollowAcceptance
+	err := json.NewDecoder(r.Body).Decode(&accepted)
+	if err != nil {
+		http.Error(w, "Error decoding request body", http.StatusNotAcceptable)
+		return
+	}
+
+	//validate ids in db follower
+	var user_id, follwer_id int64
+	err = db.DB.QueryRow("SELECT user_id,follower_id FROM follower WHERE follower_id=$1 AND accepted=$2", accepted.AcceptorUserID, false).Scan(&user_id, &follwer_id)
+	if err != nil {
+		http.Error(w, "Request doesn't exist", http.StatusInternalServerError)
+		return
+	}
+
+	if accepted.AcceptStatus {
+		_, err = db.DB.Query("UPDATE follower SET accepted=$1 WHERE user_id=$2 AND follower_id=$3", true, accepted.RequestorId, accepted.AcceptorUserID)
+		if err != nil {
+			http.Error(w, "Couldn't update request", http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprintln(w, "Accepted follow request")
+	} else {
+		_, err = db.DB.Query("DELETE FROM follower WHERE user_id=$1 AND follower_id=$2 AND accepted=$3", accepted.RequestorId, accepted.AcceptorUserID, false)
+		if err != nil {
+			http.Error(w, "Couldn't delete pending follow request", http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprintln(w, "Deleted follow request")
+	}
+}
+
+func RemoveFollowers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var follower models.DeleteFollower
+	err := json.NewDecoder(r.Body).Decode(&follower)
+	if err != nil {
+		http.Error(w, "Error decoding the request body", http.StatusBadRequest)
+		return
+	}
+
+	if follower.FollowerUserId == 0 && follower.MyuserId == 0 {
+		http.Error(w, "Missing or invalid Ids", http.StatusInternalServerError)
+		return
+	}
+
+	_, err = db.DB.Query("DELETE FROM follower WHERE user_id=$1 AND follower_id=$2 AND accepted=$3", follower.FollowerUserId, follower.MyuserId, true)
+	if err != nil {
+		http.Error(w, "Error removing the follower", http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintln(w, "Removed follower successfully")
+
+}
+
+func GetFollowing(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method invalid", http.StatusMethodNotAllowed)
+		return
+	}
+	var userId models.UserID
+	err := json.NewDecoder(r.Body).Decode(&userId)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusMethodNotAllowed)
+		return
+	}
+
+	row, err := db.DB.Query("SELECT follower_id FROM follower WHERE user_id=$1 AND accepted=$2", userId.UserId, true)
+	if err != nil {
+		panic(err)
+	}
+	var following []models.Follows
+	for row.Next() {
+		var follow models.Follows
+		err = row.Scan(&follow.UserID)
+		if err != nil {
+			panic(err)
+		}
+		err = db.DB.QueryRow("SELECT name,user_name,display_pic FROM users WHERE user_id=$1", follow.UserID).Scan(&follow.Name, &follow.UserName, &follow.ProfilePic)
+		if err != nil {
+			panic(err)
+		}
+		follow.ProfilePic = "http://localhost:3000/getProfilePic/" + follow.ProfilePic
+		follow.FollowingBackStatus = true
+		following = append(following, follow)
+	}
+	json.NewEncoder(w).Encode(following)
+}
+
+func UpdateBio(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var updateProfile models.ProfileUpdate
+	err := json.NewDecoder(r.Body).Decode(&updateProfile)
+	if err != nil {
+		http.Error(w, "Error decoding request", http.StatusNoContent)
+		return
+	}
+
+	if updateProfile.UserID <= 0 {
+		http.Error(w, "User ID not accepted or missing field", http.StatusNotAcceptable)
+		return
+	}
+
+	if len(updateProfile.Bio) > 150 {
+		http.Error(w, "Bio exceeds the character limit (150)", http.StatusNotAcceptable)
+		return
+	}
+
+	// user name validation
+
+	match, _ := regexp.MatchString("^[a-zA-Z0-9][a-zA-Z0-9_]*$", updateProfile.UserName)
+	if !match {
+		fmt.Fprintln(w, "User name should start with alphabet and can have combination minimum 8 characters of numbers and only underscore(_)")
+		return
+	}
+
+	if len(updateProfile.UserName) < 7 || len(updateProfile.UserName) > 20 {
+		http.Error(w, "Username should be of length(7,20)", http.StatusMethodNotAllowed)
+		return
+	}
+
+	//validate name
+	if len(updateProfile.Name) > 20 {
+		http.Error(w, "Name should be less than 20 characters", http.StatusMethodNotAllowed)
+		return
+	}
+
+	_, err = db.DB.Query("UPDATE users SET bio =$1,name=$2,user_name=$3 WHERE user_id=$4", updateProfile.Bio, updateProfile.Name, updateProfile.UserName, updateProfile.UserID)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Fprint(w, "Update successful")
+}
+
+func UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var userId models.UserID
+	err := json.NewDecoder(r.Body).Decode(&userId)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var profile models.Profile
+	var partialURL string
+
+	//get info from users table
+	getProfile := `SELECT user_name,display_pic,bio,private FROM users WHERE user_id=$1`
+	err = db.DB.QueryRow(getProfile, userId.UserId).Scan(&profile.UserName, &partialURL, &profile.Bio, &profile.PrivateAccount)
+	if err != nil {
+		panic(err)
+	}
+
+	profile.UserID = userId.UserId
+
+	profile.ProfilePic = "http://localhost:3000/getProfilePic/" + partialURL
+
+	//get count of total post of user
+	getPostCount := `SELECT COUNT(post_id) FROM posts WHERE user_id=$1`
+	err = db.DB.QueryRow(getPostCount, userId.UserId).Scan(&profile.PostCount)
+	if err != nil {
+		panic(err)
+	}
+
+	//get count of followers
+	getFollowerCount := `SELECT COUNT(user_id) FROM follower WHERE follower_id=$1`
+	err = db.DB.QueryRow(getFollowerCount, userId.UserId).Scan(&profile.FollowerCount)
+	if err != nil {
+		panic(err)
+	}
+
+	//get following count
+	getFollowingCount := `SELECT COUNT(follower_id) FROM follower WHERE user_id=$1`
+	err = db.DB.QueryRow(getFollowingCount, userId.UserId).Scan(&profile.FollowingCount)
+	if err != nil {
+		panic(err)
+	}
+
+	json.NewEncoder(w).Encode(profile)
+}
+
+func SavePosts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var post models.LikePost //reusing struct with user_id and post_id fields
+	err := json.NewDecoder(r.Body).Decode(&post)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if post.PostId == 0 || post.UserID == 0 {
+		http.Error(w, "Invalid post or userd ID", http.StatusInternalServerError)
+		return
+	}
+
+	err = db.DB.QueryRow("SELECT post_id FROM posts WHERE post_id=$1", post.PostId).Scan(&post.PostId)
+	if err != nil {
+		http.Error(w, "Invalid post id/doesnt exist in db posts", http.StatusNotAcceptable)
+		return
+	}
+
+	var postId, userId int64
+	var savedStatus models.SavedStatus
+	err = db.DB.QueryRow("SELECT post_id,user_id FROM savedposts WHERE post_id=$1", post.PostId).Scan(&postId, &userId)
+	if err != nil {
+		//insert into savedposts  table
+
+		_, err = db.DB.Query("INSERT INTO savedposts(post_id,user_id) VALUES($1,$2)", post.PostId, post.UserID)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Fprintln(w, "Saved successfully")
+		savedStatus.SavedStatus = true
+		json.NewEncoder(w).Encode(savedStatus)
+		return
+
+	}
+
+	if postId == post.PostId && userId == post.UserID {
+		_, err = db.DB.Query("DELETE FROM savedposts WHERE post_id=$1", postId)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Fprintln(w, "Removed from saved successfully")
+		savedStatus.SavedStatus = false
+		json.NewEncoder(w).Encode(savedStatus)
+		return
+	}
+
+}
+
+func GetPost(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	//:var id int64
+	idstr := fmt.Sprint(r.URL)
+
+	_, idstr = path.Split(idstr)
+
+	postId, err := strconv.Atoi(idstr)
+	if err != nil {
+		http.Error(w, "Bad post id", http.StatusMethodNotAllowed)
+		return
+	}
+
+	err = db.DB.QueryRow("SELECT post_id FROM posts WHERE post_id=$1 AND complete_post=$2", postId, true).Scan(&postId)
+	if err != nil {
+		http.Error(w, "Invalid postId or does not exist", http.StatusInternalServerError)
+		return
+	}
+	var post models.UsersPost
+
+	post.PostId = int64(postId)
+
+	var postURL string
+	query := `SELECT user_id,post_path,poat_caption,location,hide_like,hide_comments,posted_on FROM posts WHERE post_id=$1 AND complete_post=$2`
+	err = db.DB.QueryRow(query, postId, true).Scan(&post.UserID, &postURL, &post.PostCaption, &post.AttachedLocation, &post.HideLikeCount, &post.TurnOffComments, &post.PostedOn)
+	if err != nil {
+		// http.Error(w, "Error fetching data from db posts", http.StatusInternalServerError)
+		// return
+		panic(err)
+	}
+
+	filetype := strings.Split(postURL, ".")
+	post.FileType = models.GetExtension("." + filetype[len(filetype)-1])
+
+	postURL = "http://localhost:3000/download/" + postURL
+	post.PostURL = append(post.PostURL, postURL)
+
+	var URL string
+	err = db.DB.QueryRow("SELECT user_name,display_pic FROM users WHERE user_id=$1", post.UserID).Scan(&post.UserName, &URL)
+	if err != nil {
+		http.Error(w, "Error retriving data from db users", http.StatusInternalServerError)
+		return
+	}
+	post.UserProfilePicURL = "http://localhost:3000/getProfilePic/" + URL
+
+	err = db.DB.QueryRow("SELECT COUNT(user_name) FROM likes WHERE post_id=$1", postId).Scan(&post.Likes)
+	if err != nil {
+		http.Error(w, "Error retriving likes count", http.StatusInternalServerError)
+		return
+	}
+
+	//pending : update like status
+
+	err = json.NewEncoder(w).Encode(post)
+	if err != nil {
+		// http.Error(w,"Error encoding response",http.StatusInternalServerError)
+		fmt.Fprintln(w, "Error encoding response")
+		return
+	}
+
+}
+
+func SavedPosts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var userId models.UserID
+	err := json.NewDecoder(r.Body).Decode(&userId)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if userId.UserId == 0 {
+		fmt.Fprintln(w, "Invalid User ID")
+		return
+	}
+
+	row, err := db.DB.Query("SELECT post_id FROM savedposts WHERE user_id=$1", userId.UserId)
+	if err != nil {
+		panic(err)
+	}
+
+	var finalpostid []models.SavedPosts
+	for row.Next() {
+		var postid models.SavedPosts
+		var posturl string
+		err = row.Scan(&postid.PostId)
+		if err != nil {
+			panic(err)
+		}
+		err = db.DB.QueryRow("SELECT post_path FROM posts WHERE post_id=$1", postid.PostId).Scan(&posturl)
+		ext := strings.ToLower(filepath.Ext(posturl))
+
+		postid.ContentType = models.GetExtension(ext)
+		postid.PostURL = "http://localhost:3000/download/" + posturl
+		finalpostid = append(finalpostid, postid)
+	}
+
+	json.NewEncoder(w).Encode(finalpostid)
+
+}
+
+func DeleteAccount(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var loginCred models.LoginCred
+	err := json.NewDecoder(r.Body).Decode(&loginCred)
+	if err != nil {
+		http.Error(w, "Error decoding request body", http.StatusPartialContent)
+		return
+	}
+
+	if loginCred.Password == "" && loginCred.UserName == "" {
+		http.Error(w, "Invalid username or Password", http.StatusPartialContent)
+		return
+	}
+
+	var passwordHash string
+	err = db.DB.QueryRow("SELECT password FROM users WHERE user_name=$1", loginCred.UserName).Scan(&passwordHash)
+	if err != nil {
+		panic(err)
+	}
+	err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(loginCred.Password))
+	if err == nil {
+		_, err = db.DB.Query("DELETE FROM users WHERE user_name=$1", loginCred.UserName)
+		if err != nil {
+			http.Error(w, "Error occured while deleting account", http.StatusInternalServerError)
+			return
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(w, "Invalid password")
+		return
+	}
+
+}
+
+func RemoveSavedPost(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var remove models.LikePost //reusing struct
+	err := json.NewDecoder(r.Body).Decode(&remove)
+	if err != nil {
+		http.Error(w, "Error decoding request body", http.StatusBadRequest)
+		return
+	}
+
+	if remove.PostId <= 0 || remove.UserID <= 0 {
+		http.Error(w, "Missing field or invalid ids", http.StatusInternalServerError)
+		return
+	}
+
+	err = db.DB.QueryRow("SELECT user_id,post_id FROM savedposts WHERE user_id=$1 AND post_id=$2", remove.UserID, remove.PostId).Scan(&remove.UserID, &remove.PostId)
+	if err != nil {
+		http.Error(w, "Invalid user_id", http.StatusInternalServerError)
+		return
+	}
+
+	_, err = db.DB.Query("DELETE FROM savedposts WHERE user_id=$1 AND post_id=$2", remove.UserID, remove.PostId)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Fprintln(w, "Removed post from saved posts")
+}
+
+func TurnOffComments(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var commentoff models.LikePost //reusing struct fields
+	err := json.NewDecoder(r.Body).Decode(&commentoff)
+	if err != nil {
+		http.Error(w, "Error decoding request body", http.StatusBadRequest)
+		return
+	}
+
+	if commentoff.PostId <= 0 || commentoff.UserID <= 0 {
+		fmt.Fprintln(w, "Invalid ids or missing field")
+		return
+	}
+
+	err = db.DB.QueryRow("SELECT user_id,post_id FROM posts WHERE user_id=$1 AND post_id=$2", commentoff.UserID, commentoff.PostId).Scan(&commentoff.UserID, &commentoff.PostId)
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = db.DB.Query("UPDATE posts SET hide_comments=$1 WHERE user_id=$2", true, commentoff.UserID)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Fprintln(w, "Comments turned off")
+
+}
+
+func TurnONComments(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var commentoff models.LikePost //reusing struct fields
+	err := json.NewDecoder(r.Body).Decode(&commentoff)
+	if err != nil {
+		http.Error(w, "Error decoding request body", http.StatusBadRequest)
+		return
+	}
+
+	if commentoff.PostId <= 0 || commentoff.UserID <= 0 {
+		fmt.Fprintln(w, "Invalid ids or missing field")
+		return
+	}
+
+	err = db.DB.QueryRow("SELECT user_id,post_id FROM posts WHERE user_id=$1 AND post_id=$2", commentoff.UserID, commentoff.PostId).Scan(&commentoff.UserID, &commentoff.PostId)
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = db.DB.Query("UPDATE posts SET hide_comments=$1 WHERE user_id=$2", false, commentoff.UserID)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Fprintln(w, "Comments turned on")
+
+}
+
+func HideLikeCount(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var commentoff models.LikePost //reusing struct fields
+	err := json.NewDecoder(r.Body).Decode(&commentoff)
+	if err != nil {
+		http.Error(w, "Error decoding request body", http.StatusBadRequest)
+		return
+	}
+
+	if commentoff.PostId <= 0 || commentoff.UserID <= 0 {
+		fmt.Fprintln(w, "Invalid ids or missing field")
+		return
+	}
+
+	err = db.DB.QueryRow("SELECT user_id,post_id FROM posts WHERE user_id=$1 AND post_id=$2", commentoff.UserID, commentoff.PostId).Scan(&commentoff.UserID, &commentoff.PostId)
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = db.DB.Query("UPDATE posts SET hide_like=$1 WHERE user_id=$2", true, commentoff.UserID)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Fprintln(w, "updated hide_like=true")
+
+}
+
+func ShowLikeCount(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var commentoff models.LikePost //reusing struct fields
+	err := json.NewDecoder(r.Body).Decode(&commentoff)
+	if err != nil {
+		http.Error(w, "Error decoding request body", http.StatusBadRequest)
+		return
+	}
+
+	if commentoff.PostId <= 0 || commentoff.UserID <= 0 {
+		fmt.Fprintln(w, "Invalid ids or missing field")
+		return
+	}
+
+	err = db.DB.QueryRow("SELECT user_id,post_id FROM posts WHERE user_id=$1 AND post_id=$2", commentoff.UserID, commentoff.PostId).Scan(&commentoff.UserID, &commentoff.PostId)
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = db.DB.Query("UPDATE posts SET hide_like=$1 WHERE user_id=$2", false, commentoff.UserID)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Fprintln(w, "updated hide_likes=false")
+
+}
+
+func DeleteComment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var deleteComment models.DeleteComment
+	err := json.NewDecoder(r.Body).Decode(&deleteComment)
+	if err != nil {
+		http.Error(w, "Error decoding request body", http.StatusBadRequest)
+		return
+	}
+
+	if deleteComment.CommentId <= 0 || deleteComment.PostId <= 0 || deleteComment.UserID <= 0 {
+		http.Error(w, "Missing fields or inavlid ids", http.StatusResetContent)
+		return
+	}
+
+	err = db.DB.QueryRow("SELECT user_id,post_id FROM posts WHERE user_id=$1 AND post_id=$2", deleteComment.UserID, deleteComment.PostId).Scan(&deleteComment.UserID, &deleteComment.PostId)
+	if err != nil {
+		http.Error(w, "Invalid Ids for operation", http.StatusInternalServerError)
+		return
+	}
+
+	err = db.DB.QueryRow("SELECT post_id,comment_id FROM comments WHERE post_id=$1 AND comment_id=$2", deleteComment.PostId, deleteComment.CommentId).Scan(&deleteComment.PostId, &deleteComment.CommentId)
+	if err != nil {
+		http.Error(w, "Invalid Ids for operation", http.StatusInternalServerError)
+		return
+	}
+
+	_, err = db.DB.Query("DELETE FROM comments WHERE post_id=$1 AND comment_id=$2", deleteComment.PostId, deleteComment.CommentId)
+	if err != nil {
+		http.Error(w, "error deleting comment", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Fprintln(w, "Comment deleted succefully")
+
+}
+
+func SearchAccounts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var username models.UserName
+	err := json.NewDecoder(r.Body).Decode(&username)
+	if err != nil {
+		http.Error(w, "error decoding request body", http.StatusBadRequest)
+		return
+	}
+
+	if username.UserName == "" {
+		http.Error(w, "Invalid user name or missing field", http.StatusPartialContent)
+		return
+	}
+
+	str := regexp.MustCompile(`[a-zA-Z]*`)
+	name := str.FindAllString(username.UserName, 1)
+
+	num := regexp.MustCompile(`\d+`)
+	number := num.FindAllString(username.UserName, 1)
+
+	var like string
+	if len(number) == 0 {
+		like = "%" + name[0] + "%"
+	}
+	if len(name) == 0 {
+		like = "%" + number[0] + "%"
+	}
+	if len(name) != 0 && len(number) != 0 {
+		like = "%" + name[0] + "%" + number[0] + "%"
+	}
+	row, err := db.DB.Query("SELECT user_id,user_name,name,display_pic FROM users WHERE user_name ILIKE $1", like)
+	if err != nil {
+		panic(err)
+	}
+
+	var accounts []models.Accounts
+	for row.Next() {
+		var acc models.Accounts
+		err = row.Scan(&acc.UserID, &acc.UserName, &acc.Name, &acc.ProfilePic)
+		if err != nil {
+			panic(err)
+		}
+		acc.ProfilePic = "http://localhost:3000/getProfilePic/" + acc.ProfilePic
+		accounts = append(accounts, acc)
+
+	}
+
+	json.NewEncoder(w).Encode(accounts)
+}
+
+func SearchHashtag(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var hashtag models.HashtagSearch
+	err := json.NewDecoder(r.Body).Decode(&hashtag)
+	if err != nil {
+		http.Error(w, "Error decoding request body", http.StatusPartialContent)
+		return
+	}
+	str := regexp.MustCompile(`[a-zA-Z_]*`)
+	name := str.FindAllString(hashtag.Hashtag, 1)
+
+	num := regexp.MustCompile(`\d+`)
+	number := num.FindAllString(hashtag.Hashtag, 1)
+
+	var like string
+	if len(number) == 0 {
+		like = name[0] + "%"
+	}
+	if len(name) == 0 {
+		like = number[0] + "%"
+	}
+	if len(name) != 0 && len(number) != 0 {
+		like = name[0] + "%" + number[0] + "%"
+	}
+
+	row, err := db.DB.Query("SELECT hash_id,hash_name FROM hashtags WHERE hash_name ILIKE $1", like)
+	if err != nil {
+		panic(err)
+	}
+
+	var results []models.HashtagSearchResult
+	for row.Next() {
+		var result models.HashtagSearchResult
+		err = row.Scan(&result.HashId, &result.HashName)
+		if err != nil {
+			http.Error(w, "error reading hashtable", http.StatusInternalServerError)
+			return
+		}
+
+		if result.HashId == 0 {
+			fmt.Println("its empty")
+
+		}
+
+		err = db.DB.QueryRow("SELECT COUNT(post_id) FROM mentions WHERE hash_id=$1", result.HashId).Scan(&result.PostCount)
+		if err != nil {
+			http.Error(w, "Error getting count of posts of hash", http.StatusInternalServerError)
+			return
+		}
+
+		results = append(results, result)
+
+	}
+	var newhashtag models.Newhashtag
+	if len(results) == 0 {
+
+		err = db.DB.QueryRow("INSERT INTO hashtags(hash_name) VALUES($1) RETURNING hash_id", hashtag.Hashtag).Scan(&newhashtag.NewHashId)
+		if err != nil {
+			panic(err)
+			// http.Error(w, "Error creating new hash", http.StatusInternalServerError)
+			// return
+		}
+
+		json.NewEncoder(w).Encode(newhashtag)
+
+	}
+
+	if len(results) != 0 {
+		json.NewEncoder(w).Encode(results)
+	}
+
+}
+
+func PostUploadStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var post_id models.PostId
+	err := json.NewDecoder(r.Body).Decode(&post_id)
+	if err != nil {
+		panic(err)
+	}
+	var postUploadStatus models.SavedStatus
+	err = db.DB.QueryRow("SELECT complete_post FROM posts WHERE post_id=$1", post_id.PostId).Scan(&postUploadStatus.SavedStatus)
+	if err != nil {
+		panic(err)
+	}
+
+	json.NewEncoder(w).Encode(postUploadStatus)
 }

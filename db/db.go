@@ -21,7 +21,7 @@ func ConnectDB() {
 	user := os.Getenv("USER")
 	password := os.Getenv("PASSWORD")
 	dbname := os.Getenv("DB_NAME")
-	psqlinfo := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", host, port, user, password, dbname)
+	psqlinfo := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", host, port, user, password, dbname)
 
 	DB, err = sql.Open("postgres", psqlinfo)
 	if err != nil {
