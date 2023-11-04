@@ -3,11 +3,11 @@ package handlers
 import (
 	"backend/db"
 	"backend/models"
+	"backend/src"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"os"
 	"path"
@@ -60,133 +60,8 @@ func NewUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//check for missing fields
-	if userdata.Private == nil {
-		http.Error(w, "Invalid or missing privateAccount field", http.StatusMethodNotAllowed)
-		return
-	}
-	if userdata.UserName == "" {
-		http.Error(w, "Missing userName field", http.StatusMethodNotAllowed)
-		return
-	}
-	if userdata.Password == "" {
-		http.Error(w, "Missing password field", http.StatusMethodNotAllowed)
-		return
-	}
-	if userdata.Email == "" {
-		http.Error(w, "Missing email field", http.StatusMethodNotAllowed)
-		return
-	}
-	if userdata.PhoneNumber == "" {
-		http.Error(w, "Missing phone number field", http.StatusMethodNotAllowed)
-		return
-	}
-	if userdata.UserName == "" {
-		http.Error(w, "Missing userName field", http.StatusMethodNotAllowed)
-		return
-	}
-	if userdata.DOB == "" {
-		http.Error(w, "Missing DOB field", http.StatusMethodNotAllowed)
-		return
-	}
-	if userdata.Bio == nil {
-		http.Error(w, "Missing bio field", http.StatusMethodNotAllowed)
-		return
-	}
-	if userdata.Name == "" {
-		http.Error(w, "Missing name field", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// user name validation
-
-	match, _ := regexp.MatchString("^[a-zA-Z0-9][a-zA-Z0-9_]*$", userdata.UserName)
-	if !match {
-		fmt.Fprintln(w, "User name should start with alphabet and can have combination minimum 8 characters of numbers and only underscore(_)")
-		return
-	}
-
-	if len(userdata.UserName) < 7 || len(userdata.UserName) > 20 {
-		http.Error(w, "Username should be of length(7,20)", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if len(userdata.Name) > 20 {
-		http.Error(w, "Name should be less than 20 character", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// user password validation
-	if len(userdata.Password) == 0 {
-		http.Error(w, "Missing password field", http.StatusMethodNotAllowed)
-		return
-	}
-
-	match, _ = regexp.MatchString("[0-9]+?", userdata.Password)
-	if !match {
-		fmt.Fprintln(w, "Password must contain atleast one number")
-		return
-	}
-	match, _ = regexp.MatchString("[A-Z]+?", userdata.Password)
-	if !match {
-		fmt.Fprintln(w, "Password must contain atleast upper case letter")
-		return
-	}
-	match, _ = regexp.MatchString("[a-z]+?", userdata.Password)
-	if !match {
-		fmt.Fprintln(w, "Password must contain atleast lower case letter")
-		return
-	}
-	match, _ = regexp.MatchString("[!@#$%^&*_]+?", userdata.Password)
-	if !match {
-		fmt.Fprintln(w, "Password must contain atleast special character")
-		return
-	}
-	match, _ = regexp.MatchString(".{8,30}", userdata.Password)
-	if !match {
-		fmt.Fprintln(w, "Password length must be atleast 8 character long")
-		return
-	}
-
-	//phone number validation
-	match, _ = regexp.MatchString("^[+]{1}[0-9]{0,3}\\s?[0-9]{10}$", userdata.PhoneNumber)
-	if !match {
-		fmt.Fprintln(w, "Please enter valid phone number")
-		return
-	}
-
-	//validate email using net/mail
-	emailregex := regexp.MustCompile("^[A-Za-za0-9.!#$%&'*+\\/=?^_`{|}~-]+@[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")
-	match = emailregex.MatchString(userdata.Email)
-	if !match {
-		fmt.Fprintln(w, "Please enter valid email")
-		return
-	}
-	if len(userdata.Email) < 3 && len(userdata.Email) > 254 {
-		http.Error(w, "Invalid email", http.StatusMethodNotAllowed)
-		return
-	}
-
-	i := strings.Index(userdata.Email, "@")
-	host := userdata.Email[i+1:]
-
-	_, err = net.LookupMX(host)
-	if err != nil {
-		http.Error(w, "Invalid email(host not found)", http.StatusMethodNotAllowed)
-		return
-	}
-	//validate date
-	layout := "2006-01-02"
-	bdate, err := time.Parse(layout, userdata.DOB)
-	if err != nil {
-		fmt.Fprintln(w, "Enter a valid date format")
-		return
-	}
-	cdate := time.Now()
-
-	age := cdate.Sub(bdate)
-	if age.Hours() < 113958 {
-		fmt.Fprintln(w, "Enter proper date of birth,You ahould be minimum of 13 years old to create an account")
+	if err = src.ValidateNewUserInput(&userdata); err != nil {
+		http.Error(w, fmt.Sprint(err), http.StatusBadRequest)
 		return
 	}
 
